@@ -1,0 +1,25 @@
+.PHONY: all
+all: set-env terraform-init terraform-validate terraform-plan terraform-apply terraform-plan-destroy terraform-destroy
+
+TERRAFORM_FOLDER ?= "terraform"
+TARGET_ACCOUNT ?= "css-prod"
+
+
+terraform-init:
+	terraform -chdir=${TERRAFORM_FOLDER} init
+	terraform -chdir=${TERRAFORM_FOLDER} get -update 
+
+terraform-validate:
+	terraform -chdir=${TERRAFORM_FOLDER} validate 
+
+terraform-plan:
+	terraform -chdir=${TERRAFORM_FOLDER} plan -out=tfplan 
+
+terraform-apply:
+	terraform -chdir=${TERRAFORM_FOLDER} apply "tfplan"  
+
+terraform-plan-destroy:
+	terraform -chdir=${TERRAFORM_FOLDER} plan -destroy -out=destroytfplan
+
+terraform-destroy:
+	terraform -chdir=${TERRAFORM_FOLDER} apply -destroy "destroytfplan"  

@@ -1,0 +1,95 @@
+#!/usr/bin/env groovy
+
+properties([
+  parameters([
+    booleanParam(defaultValue: false, description: 'Enable deployment', name: 'deploy_enabled'),
+    booleanParam(defaultValue: false, description: 'Destroy infrastructure', name: 'destroy_enabled'),
+  ])
+])
+
+def podDefinition = """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: terraform
+    image: quay.io/emiratesgroup/iac-network-new-image
+    imagePullPolicy: Always
+    tty: true
+    command:
+    - cat
+  imagePullSecrets:
+  - name: emiratesgroup-robot-common-pull-secret
+"""
+
+podTemplate(yaml: podDefinition) {
+  node(POD_LABEL) {
+    timestamps {
+      ansiColor('xterm') {
+        container("terraform") {
+          stage('Setup environment') {
+            deleteDir()
+            checkout scm
+          }
+
+          def tfDirs = "terraform/"
+
+          def folders = sh(returnStdout: true, script: "find ${tfDirs} -mindepth 1 -maxdepth 1 -type d").trim().split('\n')
+
+         withCredentials([
+            azureServicePrincipal(
+                    credentialsId: 'azurecssprdsrvcprincipal',
+                    subscriptionIdVariable: 'ARM_SUBSCRIPTION_ID',
+                    clientIdVariable: 'ARM_CLIENT_ID',
+                    clientSecretVariable: 'ARM_CLIENT_SECRET',
+                    tenantIdVariable: 'ARM_TENANT_ID'
+                )]){
+            try {
+              folders.each {
+                lock(resource: "${it}") {
+                    deploy_infrastructure(it)
+                  }
+              }
+            } catch (err) {
+              throw (err)
+            }
+          }
+        }
+      }
+    }
+  }
+} 
+
+def deploy_infrastructure(def workingdir) {
+  stage("Terraform init") {
+    sh "make terraform-init TERRAFORM_FOLDER=${workingdir}"
+  }
+
+  stage("Terraform Validate") {
+    sh "make terraform-validate TERRAFORM_FOLDER=${workingdir}"
+  }
+
+  if (params.destroy_enabled) {
+    stage("Terraform Plan") {
+      sh "make terraform-plan-destroy TERRAFORM_FOLDER=${workingdir}"
+    }
+
+    stage("Terraform Destroy") {
+      sh "make terraform-destroy TERRAFORM_FOLDER=${workingdir}"
+    }
+  } else {
+    stage("Terraform Plan") {
+      sh "make terraform-plan TERRAFORM_FOLDER=${workingdir}"
+    }
+  }
+
+  if (params.deploy_enabled && env.BRANCH_NAME == "master") {
+    try {
+      stage("Terraform Apply") {
+        sh "make terraform-apply TERRAFORM_FOLDER=${workingdir}"
+      }
+    } catch (err) {
+      throw (err)
+    }
+  }
+}
